@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cascading Dot Grid</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background: #e8ddd3;
+    }
+
+    svg {
+      width: 90vmin;
+      height: 90vmin;
+    }
+  </style>
+</head>
+<body>
+  <svg id="grid" viewBox="0 0 800 800"></svg>
+
+  <script>
+    const COLS = 20;
+    const ROWS = 20;
+    const SPACING = 40;
+    const DOT_R = 17;
+    const CASCADE_RADIUS = 2.5;
+    const DELAY_PER_STEP = 100;
+    const LAYER_STAGGER = 150;
+    const GROW_DURATION = 500;
+    const SHRINK_DURATION = 400;
+    const NUM_LAYERS = 5;
+
+    const palettes = [
+      ['#1a5c3a', '#0d3b66', '#fff01f', '#134e6f', '#0b6e4f'],
+      ['#0d3b66', '#fff01f', '#1a5c3a', '#0b6e4f', '#1b4332'],
+      ['#134e6f', '#1b4332', '#0d3b66', '#fff01f', '#1a5c3a'],
+      ['#0b6e4f', '#1a5c3a', '#134e6f', '#1b4332', '#fff01f'],
+      ['#fff01f', '#0b6e4f', '#2e8b57', '#0d3b66', '#134e6f'],
+    ];
+
+    const svg = document.getElementById('grid');
+    const ns = 'http://www.w3.org/2000/svg';
+    const dots = [];
+
+    function getPalette(col, row) {
+      return palettes[(col * 3 + row * 7) % palettes.length];
+    }
+
+    // smooth sine ease
+    function easeInOut(t) {
+      return -(Math.cos(Math.PI * t) - 1) / 2;
+    }
+
+    // idle → growing → shrinking → idle
+    // Once triggered, full cycle runs. Cannot be interrupted.
+
+    for (let row = 0; row < ROWS; row++) {
+      for (let col = 0; col < COLS; col++) {
+        const cx = SPACING + col * SPACING;
+        const cy = SPACING + row * SPACING;
+        const palette = getPalette(col, row);
+
+        const layers = [];
+        for (let i = 0; i < NUM_LAYERS; i++) {
+          const layer = document.createElementNS(ns, 'circle');
+          layer.setAttribute('cx', cx);
+          layer.setAttribute('cy', cy);
+          layer.setAttribute('r', 0);
+          layer.setAttribute('fill', palette[i]);
+          svg.appendChild(layer);
+          layers.push(layer);
+        }
+
+        dots.push({
+          layers, col, row, palette,
+          state: 'idle',
+          phaseStart: 0,
+        });
+      }
+    }
+
+    let animating = false;
+
+    function tick(timestamp) {
+      let anyActive = false;
+
+      for (const dot of dots) {
+        if (dot.state === 'idle') continue;
+        anyActive = true;
+
+        const t0 = dot.phaseStart;
+
+        if (dot.state === 'growing') {
+          let allDone = true;
+          for (let i = 0; i < NUM_LAYERS; i++) {
+            const layerStart = t0 + i * LAYER_STAGGER;
+            if (timestamp < layerStart) {
+              allDone = false;
+              continue;
+            }
+            const elapsed = timestamp - layerStart;
+            const progress = Math.min(1, elapsed / GROW_DURATION);
+            const r = DOT_R * easeInOut(progress);
+            dot.layers[i].setAttribute('r', Math.max(0, r));
+            if (progress < 1) allDone = false;
+          }
+
+          if (allDone) {
+            // no hold — immediately shrink
+            dot.state = 'shrinking';
+            dot.phaseStart = timestamp;
+          }
+        }
+
+        else if (dot.state === 'shrinking') {
+          let allDone = true;
+          for (let i = NUM_LAYERS - 1; i >= 0; i--) {
+            const reverseI = NUM_LAYERS - 1 - i;
+            const layerStart = t0 + reverseI * 50;
+            if (timestamp < layerStart) {
+              allDone = false;
+              continue;
+            }
+            const elapsed = timestamp - layerStart;
+            const progress = Math.min(1, elapsed / SHRINK_DURATION);
+            const r = DOT_R * (1 - easeInOut(progress));
+            dot.layers[i].setAttribute('r', Math.max(0, r));
+            if (progress < 1) allDone = false;
+          }
+
+          if (allDone) {
+            dot.state = 'idle';
+          }
+        }
+      }
+
+      if (anyActive) {
+        requestAnimationFrame(tick);
+      } else {
+        animating = false;
+      }
+    }
+
+    function ensureAnimating() {
+      if (!animating) {
+        animating = true;
+        requestAnimationFrame(tick);
+      }
+    }
+
+    function triggerDot(dot, delay, now) {
+      if (dot.state !== 'idle') return;
+      dot.state = 'growing';
+      dot.phaseStart = now + delay;
+      ensureAnimating();
+    }
+
+    let lastHoveredKey = null;
+
+    svg.addEventListener('mousemove', (e) => {
+      const rect = svg.getBoundingClientRect();
+      const scaleX = 800 / rect.width;
+      const scaleY = 800 / rect.height;
+      const mx = (e.clientX - rect.left) * scaleX;
+      const my = (e.clientY - rect.top) * scaleY;
+
+      let closestDot = null;
+      let closestDist = Infinity;
+      for (const d of dots) {
+        const dx = (SPACING + d.col * SPACING) - mx;
+        const dy = (SPACING + d.row * SPACING) - my;
+        const dist = dx * dx + dy * dy;
+        if (dist < closestDist) {
+          closestDist = dist;
+          closestDot = d;
+        }
+      }
+
+      if (!closestDot || closestDist > SPACING * SPACING) return;
+
+      const key = `${closestDot.col},${closestDot.row}`;
+      if (lastHoveredKey === key) return;
+      lastHoveredKey = key;
+
+      const now = performance.now();
+
+      for (const dot of dots) {
+        const dist = Math.sqrt(
+          (dot.col - closestDot.col) ** 2 + (dot.row - closestDot.row) ** 2
+        );
+        if (dist > CASCADE_RADIUS) continue;
+        triggerDot(dot, dist * DELAY_PER_STEP, now);
+      }
+    });
+  </script>
+</body>
+</html>

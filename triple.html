@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Triple Dot Grid</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 32px;
+      min-height: 100vh;
+      background: #e8ddd3;
+    }
+
+    svg {
+      width: 28vw;
+      height: 28vw;
+    }
+  </style>
+</head>
+<body>
+  <svg id="grid0" viewBox="0 0 800 800"></svg>
+  <svg id="grid1" viewBox="0 0 800 800"></svg>
+  <svg id="grid2" viewBox="0 0 800 800"></svg>
+
+  <script>
+    const COLS = 20;
+    const ROWS = 20;
+    const SPACING = 40;
+    const DOT_R = 17;
+    const CASCADE_RADIUS = 2.5;
+    const DELAY_PER_STEP = 100;
+    const LAYER_STAGGER = 150;
+    const GROW_DURATION = 500;
+    const SHRINK_DURATION = 400;
+    const NUM_LAYERS = 5;
+
+    // palette 1: from the poster — bold blue, deep green, pink, red, orange
+    const palette1 = [
+      ['#0057ff', '#006b3f', '#f2a0c4', '#e63025', '#ffb400'],
+      ['#006b3f', '#e63025', '#0057ff', '#ffb400', '#f2a0c4'],
+      ['#f2a0c4', '#ffb400', '#006b3f', '#0057ff', '#e63025'],
+      ['#e63025', '#0057ff', '#ffb400', '#f2a0c4', '#006b3f'],
+      ['#ffb400', '#f2a0c4', '#e63025', '#006b3f', '#0057ff'],
+    ];
+
+    // palette 2: from the circles — terracotta, maroon, muted yellow, pink, teal
+    const palette2 = [
+      ['#c65d3e', '#5a0a2a', '#dbc67b', '#d4a0c8', '#1f4e4a'],
+      ['#5a0a2a', '#1f4e4a', '#c65d3e', '#a08060', '#d4a0c8'],
+      ['#1f4e4a', '#d4a0c8', '#5a0a2a', '#dbc67b', '#c65d3e'],
+      ['#dbc67b', '#c65d3e', '#d4a0c8', '#1f4e4a', '#5a0a2a'],
+      ['#d4a0c8', '#dbc67b', '#1f4e4a', '#c65d3e', '#a08060'],
+    ];
+
+    // palette 3: from the grid — orange, indigo, red, olive, pink
+    const palette3 = [
+      ['#e63025', '#ffb400', '#4630b0', '#2d6b30', '#f08070'],
+      ['#ffb400', '#4630b0', '#e63025', '#b5a030', '#f2a0c4'],
+      ['#4630b0', '#e63025', '#ffb400', '#8aabb0', '#b5a030'],
+      ['#2d6b30', '#f2a0c4', '#b5a030', '#e63025', '#ffb400'],
+      ['#b5a030', '#2d6b30', '#f08070', '#4630b0', '#e63025'],
+    ];
+
+    const colorSets = [palette1, palette2, palette3];
+    const ns = 'http://www.w3.org/2000/svg';
+
+    function easeInOut(t) {
+      return -(Math.cos(Math.PI * t) - 1) / 2;
+    }
+
+    function createGrid(svgId, palettes, cols = COLS, rows = ROWS, spacing = SPACING, dotR = DOT_R) {
+      const svg = document.getElementById(svgId);
+      const dots = [];
+
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          const cx = spacing + col * spacing;
+          const cy = spacing + row * spacing;
+          const palette = palettes[(col * 3 + row * 7) % palettes.length];
+
+          const layers = [];
+          for (let i = 0; i < NUM_LAYERS; i++) {
+            const layer = document.createElementNS(ns, 'circle');
+            layer.setAttribute('cx', cx);
+            layer.setAttribute('cy', cy);
+            layer.setAttribute('r', 0);
+            layer.setAttribute('fill', palette[i]);
+            svg.appendChild(layer);
+            layers.push(layer);
+          }
+
+          dots.push({
+            layers, col, row, dotR,
+            state: 'idle',
+            phaseStart: 0,
+          });
+        }
+      }
+
+      return { svg, dots, spacing };
+    }
+
+    const grids = [
+      createGrid('grid0', colorSets[0]),
+      createGrid('grid1', colorSets[1]),
+      createGrid('grid2', colorSets[2], 8, 8, 95, 42),
+    ];
+
+    let animating = false;
+
+    function tick(timestamp) {
+      let anyActive = false;
+
+      for (const { dots } of grids) {
+        for (const dot of dots) {
+          if (dot.state === 'idle') continue;
+          anyActive = true;
+
+          const t0 = dot.phaseStart;
+
+          if (dot.state === 'growing') {
+            let allDone = true;
+            for (let i = 0; i < NUM_LAYERS; i++) {
+              const layerStart = t0 + i * LAYER_STAGGER;
+              if (timestamp < layerStart) { allDone = false; continue; }
+              const progress = Math.min(1, (timestamp - layerStart) / GROW_DURATION);
+              dot.layers[i].setAttribute('r', Math.max(0, dot.dotR * easeInOut(progress)));
+              if (progress < 1) allDone = false;
+            }
+            if (allDone) {
+              dot.state = 'shrinking';
+              dot.phaseStart = timestamp;
+            }
+          }
+
+          else if (dot.state === 'shrinking') {
+            let allDone = true;
+            for (let i = NUM_LAYERS - 1; i >= 0; i--) {
+              const reverseI = NUM_LAYERS - 1 - i;
+              const layerStart = t0 + reverseI * 50;
+              if (timestamp < layerStart) { allDone = false; continue; }
+              const progress = Math.min(1, (timestamp - layerStart) / SHRINK_DURATION);
+              dot.layers[i].setAttribute('r', Math.max(0, dot.dotR * (1 - easeInOut(progress))));
+              if (progress < 1) allDone = false;
+            }
+            if (allDone) dot.state = 'idle';
+          }
+        }
+      }
+
+      if (anyActive) {
+        requestAnimationFrame(tick);
+      } else {
+        animating = false;
+      }
+    }
+
+    function ensureAnimating() {
+      if (!animating) {
+        animating = true;
+        requestAnimationFrame(tick);
+      }
+    }
+
+    // hover handling per grid
+    grids.forEach(({ svg, dots, spacing }) => {
+      let lastKey = null;
+      const sp = spacing || SPACING;
+
+      svg.addEventListener('mousemove', (e) => {
+        const rect = svg.getBoundingClientRect();
+        const scaleX = 800 / rect.width;
+        const scaleY = 800 / rect.height;
+        const mx = (e.clientX - rect.left) * scaleX;
+        const my = (e.clientY - rect.top) * scaleY;
+
+        let closestDot = null;
+        let closestDist = Infinity;
+        for (const d of dots) {
+          const dx = (sp + d.col * sp) - mx;
+          const dy = (sp + d.row * sp) - my;
+          const dist = dx * dx + dy * dy;
+          if (dist < closestDist) {
+            closestDist = dist;
+            closestDot = d;
+          }
+        }
+
+        if (!closestDot || closestDist > sp * sp) return;
+
+        const key = `${closestDot.col},${closestDot.row}`;
+        if (lastKey === key) return;
+        lastKey = key;
+
+        const now = performance.now();
+        for (const dot of dots) {
+          const dist = Math.sqrt(
+            (dot.col - closestDot.col) ** 2 + (dot.row - closestDot.row) ** 2
+          );
+          if (dist > CASCADE_RADIUS) continue;
+          if (dot.state !== 'idle') continue;
+          dot.state = 'growing';
+          dot.phaseStart = now + dist * DELAY_PER_STEP;
+        }
+        ensureAnimating();
+      });
+    });
+  </script>
+</body>
+</html>
